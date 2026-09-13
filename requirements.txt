@@ -1,0 +1,13 @@
+requirements = """
+streamlit
+gspread
+pandas
+openpyxl
+Pillow
+google-auth
+"""
+
+with open('requirements.txt', 'w') as f:
+    f.write(requirements.strip())
+
+print("Archivo requirements.txt actualizado con streamlit.")
