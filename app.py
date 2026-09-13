@@ -3,33 +3,40 @@ import pandas as pd
 import math
 import zipfile
 import io
+import os
 from openpyxl import load_workbook
 from PIL import Image, ImageDraw, ImageFont
 
-st.set_page_config(page_title='Generador Lamicoides', layout='wide')
-st.title('🛠️ Generador de Etiquetas Lamicoides')
+st.set_page_config(page_title='Generador Lamicoides Pro', layout='wide')
+st.title('🛠️ Generador de Etiquetas Multicapa (Todas las Hojas)')
 
 # --- CONFIGURACIÓN EN SIDEBAR ---
-st.sidebar.header('Parámetros de Diseño')
+st.sidebar.header('Parámetros de Producción')
 dpi = st.sidebar.number_input('DPI (LaserGRBL)', value=600)
-sep_mm = st.sidebar.slider('Separación (mm)', 0.0, 10.0, 3.0)
-margen_hoja = st.sidebar.slider('Margen Hoja (mm)', 0.0, 20.0, 5.0)
-cols_num = st.sidebar.number_input('Columnas', min_value=1, value=3)
-margen_seg = st.sidebar.slider('Margen Seguridad Texto (mm)', 0.0, 5.0, 1.5)
+sep_mm = st.sidebar.slider('Separación entre etiquetas (mm)', 0.0, 10.0, 3.0)
+margen_hoja = st.sidebar.slider('Margen de la plancha (mm)', 0.0, 20.0, 5.0)
+cols_num = st.sidebar.number_input('Columnas por fila', min_value=1, value=3)
+margen_seg = st.sidebar.slider('Margen seguridad texto (mm)', 0.0, 5.0, 1.5)
 
 def mm_a_px(mm): return int(round(mm * dpi / 25.4))
+def pts_a_px(pts): return max(1, int(round(pts * dpi / 72.0)))
 
 def ajustar_fuente(draw, lineas, w_px, h_px):
-    for pt in range(20, 6, -1):
+    tam_base = 18
+    esp = mm_a_px(1.0)
+    for pt in range(tam_base, 5, -1):
         fnt = ImageFont.load_default()
-        max_w = 0
+        max_w, total_h = 0, 0
         for l in lineas:
             b = draw.textbbox((0,0), l, font=fnt)
             max_w = max(max_w, b[2]-b[0])
-        if max_w <= w_px: return fnt
-    return ImageFont.load_default()
+            total_h += (b[3]-b[1])
+        total_h += esp * (len(lineas)-1)
+        if max_w <= w_px and total_h <= h_px: return fnt, esp
+    return ImageFont.load_default(), esp
 
 def distribuir(etiquetas):
+    if not etiquetas: return 0, 0
     cols = min(cols_num, len(etiquetas))
     filas = math.ceil(len(etiquetas) / cols)
     anchos_cols = [0.0] * cols
@@ -51,50 +58,66 @@ def distribuir(etiquetas):
 uploaded = st.file_uploader('Carga tu archivo Excel (.xlsx)', type=['xlsx'])
 
 if uploaded:
-    wb = load_workbook(uploaded, data_only=True)
-    sh_name = st.selectbox('Selecciona la Hoja', wb.sheetnames)
-    
-    if st.button('🚀 Generar Archivos para Láser'):
-        ws = wb[sh_name]
-        header = {str(c.value).strip(): i for i, c in enumerate(ws[1], 1) if c.value}
+    if st.button('🚀 Procesar Todas las Hojas y Generar ZIP'):
+        wb = load_workbook(uploaded, data_only=True)
+        zip_buf = io.BytesIO()
         
-        etiquetas = []
-        for r in range(2, ws.max_row + 1):
-            t1 = str(ws.cell(r, header.get('Texto1', 1)).value or "").strip()
-            t2 = str(ws.cell(r, header.get('Texto2', 2)).value or "").strip()
-            t3 = str(ws.cell(r, header.get('Texto3', 3)).value or "").strip()
-            if not any([t1, t2, t3]): continue
-            
-            lineas = [l for l in [t1, t2, t3] if l]
-            ancho = float(ws.cell(r, header.get('Ancho_mm', 4)).value or 50)
-            alto = float(ws.cell(r, header.get('Alto_mm', 5)).value or 20)
-            cant = int(ws.cell(r, header.get('Cantidad', 6)).value or 1)
-            
-            for _ in range(cant):
-                etiquetas.append({'lineas': lineas, 'ancho_mm': ancho, 'alto_mm': alto})
+        with zipfile.ZipFile(zip_buf, 'w') as zf:
+            for sh_name in wb.sheetnames:
+                ws = wb[sh_name]
+                header = {str(c.value).strip(): i for i, c in enumerate(ws[1], 1) if c.value}
+                if not all(k in header for k in ['Texto1', 'Ancho_mm', 'Alto_mm']):
+                    continue
+                
+                etiquetas = []
+                for r in range(2, ws.max_row + 1):
+                    t1 = str(ws.cell(r, header['Texto1']).value or "").strip()
+                    t2 = str(ws.cell(r, header.get('Texto2', header['Texto1']+1)).value or "").strip()
+                    t3 = str(ws.cell(r, header.get('Texto3', header['Texto1']+2)).value or "").strip()
+                    if not any([t1, t2, t3]): continue
+                    
+                    lineas = [l for l in [t1, t2, t3] if l]
+                    ancho = float(ws.cell(r, header['Ancho_mm']).value or 50)
+                    alto = float(ws.cell(r, header['Alto_mm']).value or 20)
+                    cant = int(ws.cell(r, header.get('Cantidad', header['Alto_mm']+1)).value or 1)
+                    
+                    for _ in range(cant):
+                        etiquetas.append({'lineas': lineas, 'ancho_mm': ancho, 'alto_mm': alto})
 
-        if etiquetas:
-            w_h, h_h = distribuir(etiquetas)
-            img = Image.new("L", (mm_a_px(w_h), mm_a_px(h_h)), 255)
-            draw = ImageDraw.Draw(img)
-            svg = [f'<?xml version="1.0"?><svg width="{w_h}mm" height="{h_h}mm" viewBox="0 0 {w_h} {h_h}" xmlns="http://www.w3.org/2000/svg">']
-            svg.append(f'<rect x="0" y="0" width="{w_h}" height="{h_h}" fill="none" stroke="none"/>')
-            for et in etiquetas:
-                x_px, y_px = mm_a_px(et['x_mm']), mm_a_px(et['y_mm'])
-                w_px, h_px = mm_a_px(et['ancho_mm']), mm_a_px(et['alto_mm'])
-                m_px = mm_a_px(margen_seg)
-                fnt = ajustar_fuente(draw, et['lineas'], w_px - 2*m_px, h_px - 2*m_px)
-                y_offset = y_px + m_px
-                for ln in et['lineas']:
-                    draw.text((x_px + m_px, y_offset), ln, font=fnt, fill=0)
-                    y_offset += mm_a_px(5)
-                svg.append(f'<rect x="{et["x_mm"]}" y="{et["y_mm"]}" width="{et["ancho_mm"]}" height="{et["alto_mm"]}" fill="none" stroke="red" stroke-width="0.1"/>')
-            svg.append('</svg>')
-            png_out = io.BytesIO()
-            img.save(png_out, format='PNG', dpi=(dpi, dpi))
-            zip_buf = io.BytesIO()
-            with zipfile.ZipFile(zip_buf, 'w') as zf:
-                zf.writestr('01_grabado.png', png_out.getvalue())
-                zf.writestr('02_corte.svg', "\\n".join(svg))
-            st.success(f'¡Éxito! Generadas {len(etiquetas)} etiquetas.')
-            st.download_button('🎁 Descargar ZIP para LaserGRBL', zip_buf.getvalue(), 'lamicoides_laser.zip')
+                if etiquetas:
+                    w_h, h_h = distribuir(etiquetas)
+                    img = Image.new("L", (mm_a_px(w_h), mm_a_px(h_h)), 255)
+                    draw = ImageDraw.Draw(img)
+                    
+                    svg = [f'<?xml version="1.0"?><svg width="{w_h}mm" height="{h_h}mm" viewBox="0 0 {w_h} {h_h}" xmlns="http://www.w3.org/2000/svg">']
+                    svg.append(f'<rect x="0" y="0" width="{w_h}" height="{h_h}" fill="none" stroke="none"/>')
+                    
+                    for et in etiquetas:
+                        x_px, y_px = mm_a_px(et['x_mm']), mm_a_px(et['y_mm'])
+                        w_px, h_px = mm_a_px(et['ancho_mm']), mm_a_px(et['alto_mm'])
+                        m_px = mm_a_px(margen_seg)
+                        
+                        fnt, esp = ajustar_fuente(draw, et['lineas'], w_px - 2*m_px, h_px - 2*m_px)
+                        
+                        # Centrado exacto de bloque de texto
+                        total_h_txt = sum([draw.textbbox((0,0), l, font=fnt)[3]-draw.textbbox((0,0), l, font=fnt)[1] for l in et['lineas']]) + esp*(len(et['lineas'])-1)
+                        y_cursor = y_px + (h_px - total_h_txt)/2
+                        
+                        for ln in et['lineas']:
+                            b = draw.textbbox((0,0), ln, font=fnt)
+                            txt_w = b[2]-b[0]
+                            x_cursor = x_px + (w_px - txt_w)/2
+                            draw.text((x_cursor, y_cursor), ln, font=fnt, fill=0)
+                            y_cursor += (b[3]-b[1]) + esp
+                        
+                        svg.append(f'<rect x="{et["x_mm"]}" y="{et["y_mm"]}" width="{et["ancho_mm"]}" height="{et["alto_mm"]}" fill="none" stroke="red" stroke-width="0.1"/>')
+                    
+                    svg.append('</svg>')
+                    png_io = io.BytesIO()
+                    img.save(png_io, format='PNG', dpi=(dpi, dpi))
+                    
+                    zf.writestr(f'{sh_name}/01_grabado.png', png_io.getvalue())
+                    zf.writestr(f'{sh_name}/02_corte.svg', "\n".join(svg))
+        
+        st.success('✅ ¡Procesamiento completo!')
+        st.download_button('🎁 Descargar Producción Completa (ZIP)', zip_buf.getvalue(), 'produccion_lamicoides.zip')
