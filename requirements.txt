@@ -1,12 +1,15 @@
-requirements = """
-streamlit
+content = """streamlit
 pandas
 openpyxl
-Pillow
-"""
+Pillow"""
 
-# Escribimos SOLO el contenido del string, sin variables de Python
+# Escribimos el contenido directamente al archivo sin comillas ni nombres de variables
 with open('requirements.txt', 'w', encoding='utf-8') as f:
-    f.write(requirements.strip())
+    f.write(content)
 
-print("Archivo requirements.txt generado correctamente para Streamlit Cloud.")
+print("Archivo requirements.txt generado exitosamente.")
+print("Contenido del archivo:")
+print("----------------------")
+with open('requirements.txt', 'r') as f:
+    print(f.read())
+print("----------------------")
