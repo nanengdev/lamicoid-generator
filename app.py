@@ -38,14 +38,12 @@ def ajustar_fuente(draw, lineas, w_px, h_px):
     for pt in range(tam_fuente_max, 5, -1):
         fnt = cargar_fuente_escalable(pt)
         max_w, total_h = 0, 0
-        metrics = []
         for l in lineas:
             bbox = draw.textbbox((0, 0), l, font=fnt)
             w_l = bbox[2] - bbox[0]
             h_l = bbox[3] - bbox[1]
             max_w = max(max_w, w_l)
             total_h += h_l
-            metrics.append((w_l, h_l))
         
         total_h += esp_px * (len(lineas) - 1)
         
@@ -82,7 +80,6 @@ if uploaded:
         with zipfile.ZipFile(zip_buf, 'w') as zf:
             for sh_name in wb.sheetnames:
                 ws = wb[sh_name]
-                # Detectar columnas dinámicamente
                 header = {str(c.value).strip(): i for i, c in enumerate(ws[1], 1) if c.value}
                 if 'Texto1' not in header: continue
                 
@@ -112,7 +109,6 @@ if uploaded:
                         
                         fnt, esp = ajustar_fuente(draw, et['lineas'], w_et_px - 2*m_px, h_et_px - 2*m_px)
                         
-                        # Calcular bloque para centrado vertical
                         info_lineas = []
                         alto_total = 0
                         for l in et['lineas']:
@@ -124,12 +120,11 @@ if uploaded:
                         
                         y_cursor = y_et_px + (h_et_px - alto_total) / 2
                         for item in info_lineas:
-                            # Centrado absoluto: restar el offset interno (item['ox'], item['oy'])
+                            # Centrado absoluto restando el offset del bounding box
                             x_cursor = x_et_px + (w_et_px - item['w']) / 2
                             draw.text((x_cursor - item['ox'], y_cursor - item['oy']), item['t'], font=fnt, fill=0)
                             y_cursor += item['h'] + esp
                     
-                    # Generar SVG
                     svg = [f'<?xml version="1.0"?><svg width="{w_h}mm" height="{h_h}mm" viewBox="0 0 {w_h} {h_h}" xmlns="http://www.w3.org/2000/svg">']
                     svg.append(f'<rect x="0" y="0" width="{w_h}" height="{h_h}" fill="none" stroke="none"/>')
                     for et in etiquetas:
