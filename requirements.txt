@@ -5,7 +5,8 @@ openpyxl
 Pillow
 """
 
+# Escribimos SOLO el contenido del string, sin variables de Python
 with open('requirements.txt', 'w', encoding='utf-8') as f:
     f.write(requirements.strip())
 
-print("Archivo requirements.txt simplificado generado.")
+print("Archivo requirements.txt generado correctamente para Streamlit Cloud.")
