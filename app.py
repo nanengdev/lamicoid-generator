@@ -23,7 +23,6 @@ def mm_a_px(mm): return int(round(mm * dpi / 25.4))
 def pts_a_px(pts): return max(1, int(round(pts * dpi / 72.0)))
 
 def cargar_fuente_escalable(size_pt):
-    # Intentar cargar fuentes comunes en sistemas Linux (Streamlit Cloud)
     rutas = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
@@ -75,42 +74,35 @@ if uploaded:
     if st.button('🚀 Procesar y Generar ZIP'):
         wb = load_workbook(uploaded, data_only=True)
         zip_buf = io.BytesIO()
-
         with zipfile.ZipFile(zip_buf, 'w') as zf:
             for sh_name in wb.sheetnames:
                 ws = wb[sh_name]
                 header = {str(c.value).strip(): i for i, c in enumerate(ws[1], 1) if c.value}
                 if 'Texto1' not in header: continue
-
                 etiquetas = []
                 for r in range(2, ws.max_row + 1):
-                    t1 = str(ws.cell(r, header.get('Texto1')).value or "").strip()
-                    t2 = str(ws.cell(r, header.get('Texto2', 99)).value or "").strip()
-                    t3 = str(ws.cell(r, header.get('Texto3', 99)).value or "").strip()
+                    t1 = str(ws.cell(r, header.get('Texto1')).value or '').strip()
+                    t2 = str(ws.cell(r, header.get('Texto2', 99)).value or '').strip()
+                    t3 = str(ws.cell(r, header.get('Texto3', 99)).value or '').strip()
                     if not t1 and not t2 and not t3: continue
-
                     lineas_finales = []
                     for t in [t1, t2, t3]:
                         if t and t != 'None':
                             lineas_finales.extend([l.strip() for l in t.replace('\\\\n', '\\n').split('\\n') if l.strip()])
-
                     ancho = float(ws.cell(r, header.get('Ancho_mm', 99)).value or 50)
                     alto = float(ws.cell(r, header.get('Alto_mm', 99)).value or 20)
                     cant = int(ws.cell(r, header.get('Cantidad', 99)).value or 1)
                     for _ in range(cant):
                         etiquetas.append({'lineas': lineas_finales, 'ancho_mm': ancho, 'alto_mm': alto})
-
                 if etiquetas:
                     w_h, h_h = distribuir(etiquetas)
-                    img = Image.new(\"L\", (mm_a_px(w_h), mm_a_px(h_h)), 255)
+                    img = Image.new('L', (mm_a_px(w_h), mm_a_px(h_h)), 255)
                     draw = ImageDraw.Draw(img)
-
                     for et in etiquetas:
                         x_et_px, y_et_px = mm_a_px(et['x_mm']), mm_a_px(et['y_mm'])
                         w_et_px, h_et_px = mm_a_px(et['ancho_mm']), mm_a_px(et['alto_mm'])
                         m_px = mm_a_px(margen_seg)
                         fnt, esp = ajustar_fuente(draw, et['lineas'], w_et_px - 2*m_px, h_et_px - 2*m_px)
-
                         info_lineas = []
                         alto_total = 0
                         for l in et['lineas']:
@@ -119,23 +111,19 @@ if uploaded:
                             info_lineas.append({'texto': l, 'w': wl, 'h': hl, 'ox': bbox[0], 'oy': bbox[1]})
                             alto_total += hl
                         alto_total += esp * (len(et['lineas'])-1)
-
                         y_cursor = y_et_px + (h_et_px - alto_total) / 2
                         for item in info_lineas:
                             x_cursor = x_et_px + (w_et_px - item['w']) / 2
                             draw.text((x_cursor - item['ox'], y_cursor - item['oy']), item['texto'], font=fnt, fill=0)
                             y_cursor += item['h'] + esp
-
-                    svg = [f'<?xml version=\"1.0\"?><svg width=\"{w_h}mm\" height=\"{h_h}mm\" viewBox=\"0 0 {w_h} {h_h}\" xmlns=\"http://www.w3.org/2000/svg\">']
-                    svg.append(f'<rect x=\"0\" y=\"0\" width=\"{w_h}\" height=\"{h_h}\" fill=\"none\" stroke=\"none\"/>')
+                    svg = [f'<?xml version="1.0"?><svg width="{w_h}mm" height="{h_h}mm" viewBox="0 0 {w_h} {h_h}" xmlns="http://www.w3.org/2000/svg">']
+                    svg.append(f'<rect x="0" y="0" width="{w_h}" height="{h_h}" fill="none" stroke="none"/>')
                     for et in etiquetas:
-                        svg.append(f'<rect x=\"{et[\"x_mm\"]}\" y=\"{et[\"y_mm\"]}\" width=\"{et[\"ancho_mm\"]}\" height=\"{et[\"alto_mm\"]}\" fill=\"none\" stroke=\"red\" stroke-width=\"0.1\"/>')
+                        svg.append(f'<rect x="{et["x_mm"]}" y="{et["y_mm"]}" width="{et["ancho_mm"]}" height="{et["alto_mm"]}" fill="none" stroke="red" stroke-width="0.1"/>')
                     svg.append('</svg>')
-
                     png_io = io.BytesIO()
                     img.save(png_io, format='PNG', dpi=(dpi, dpi))
                     zf.writestr(f'{sh_name}/grabado.png', png_io.getvalue())
                     zf.writestr(f'{sh_name}/corte.svg', "\\n".join(svg))
-
         st.success('✅ Generado con fuentes escalables!')
         st.download_button('🎁 Descargar ZIP Final', zip_buf.getvalue(), 'lamicoides_final.zip')
