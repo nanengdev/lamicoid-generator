@@ -8,7 +8,7 @@ from openpyxl import load_workbook
 from PIL import Image, ImageDraw, ImageFont
 
 st.set_page_config(page_title='Generador Lamicoides Pro', layout='wide')
-st.title('🛠️ Generador de Etiquetas (Centrado y Tamaño Ajustable)')
+st.title('🛠️ Generador de Etiquetas')
 
 # --- CONFIGURACIÓN EN SIDEBAR ---
 st.sidebar.header('Parámetros de Producción')
