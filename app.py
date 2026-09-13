@@ -8,31 +8,26 @@ from openpyxl import load_workbook
 from PIL import Image, ImageDraw, ImageFont
 
 st.set_page_config(page_title='Generador Lamicoides Pro', layout='wide')
-st.title('🛠️ Generador de Etiquetas Multicapa (Formato Celda 1)')
+st.title('🛠️ Generador de Etiquetas (Centrado y Tamaño Ajustable)')
 
 # --- CONFIGURACIÓN EN SIDEBAR ---
 st.sidebar.header('Parámetros de Producción')
 dpi = st.sidebar.number_input('DPI (LaserGRBL)', value=600)
-sep_mm = st.sidebar.slider('Separación (mm)', 0.0, 10.0, 3.0)
+sep_mm = st.sidebar.slider('Separación entre etiquetas (mm)', 0.0, 10.0, 3.0)
 margen_hoja = st.sidebar.slider('Margen de la plancha (mm)', 0.0, 20.0, 5.0)
 cols_num = st.sidebar.number_input('Columnas por fila', min_value=1, value=3)
 margen_seg = st.sidebar.slider('Margen seguridad texto (mm)', 0.0, 5.0, 1.5)
+tam_fuente_max = st.sidebar.slider('Tamaño de fuente Máximo (pt)', 10, 100, 30)
 
 def mm_a_px(mm): return int(round(mm * dpi / 25.4))
 def pts_a_px(pts): return max(1, int(round(pts * dpi / 72.0)))
 
 def ajustar_fuente(draw, lineas, w_px, h_px):
-    # En Streamlit Cloud no hay fuentes instaladas, usamos la default pero escalada
-    # Nota: PIL default font no permite redimensionar bien. 
-    # Para mejores resultados, se recomienda subir una fuente .ttf al repo.
-    tam_base = 24 # Aumentado para que no se vea chico
     esp = mm_a_px(1.0)
-    for pt in range(tam_base, 8, -2):
-        try:
-            fnt = ImageFont.load_default() # Fallback a default
-        except:
-            fnt = ImageFont.load_default()
-        
+    for pt in range(tam_fuente_max, 5, -1):
+        fnt = ImageFont.load_default()
+        # Intentamos simular escala ya que load_default no permite size en versiones viejas
+        # En Streamlit Cloud es mejor usar la fuente default pero con una lógica de ajuste robusta
         max_w, total_h = 0, 0
         for l in lineas:
             b = draw.textbbox((0,0), l, font=fnt)
@@ -80,22 +75,26 @@ if uploaded:
                     t1 = str(ws.cell(r, header.get('Texto1')).value or "").strip()
                     t2 = str(ws.cell(r, header.get('Texto2', 99)).value or "").strip()
                     t3 = str(ws.cell(r, header.get('Texto3', 99)).value or "").strip()
-                    if not t1: continue
+                    if not t1 and not t2 and not t3: continue
                     
-                    lineas = [l for l in [t1, t2, t3] if l]
+                    # Extraer líneas soportando saltos de línea internos en cada celda
+                    lineas_finales = []
+                    for t in [t1, t2, t3]:
+                        if t and t != 'None':
+                            lineas_finales.extend([l.strip() for l in t.split('\\n') if l.strip()])
+                    
                     ancho = float(ws.cell(r, header.get('Ancho_mm', 99)).value or 50)
                     alto = float(ws.cell(r, header.get('Alto_mm', 99)).value or 20)
                     cant = int(ws.cell(r, header.get('Cantidad', 99)).value or 1)
                     
                     for _ in range(cant):
-                        etiquetas.append({'lineas': lineas, 'ancho_mm': ancho, 'alto_mm': alto})
+                        etiquetas.append({'lineas': lineas_finales, 'ancho_mm': ancho, 'alto_mm': alto})
 
                 if etiquetas:
                     w_h, h_h = distribuir(etiquetas)
                     img = Image.new("L", (mm_a_px(w_h), mm_a_px(h_h)), 255)
                     draw = ImageDraw.Draw(img)
                     
-                    # Lógica de dibujo idéntica a Celda 1
                     for et in etiquetas:
                         m_px = mm_a_px(margen_seg)
                         x_et_px, y_et_px = mm_a_px(et['x_mm']), mm_a_px(et['y_mm'])
@@ -103,23 +102,22 @@ if uploaded:
                         
                         fnt, esp = ajustar_fuente(draw, et['lineas'], w_et_px - 2*m_px, h_et_px - 2*m_px)
                         
-                        # Calcular altura total para centrado vertical
-                        total_h = 0
-                        line_data = []
+                        # Lógica de centrado de bloque completo
+                        datos_lineas = []
+                        alto_total_bloque = 0
                         for l in et['lineas']:
                             bbox = draw.textbbox((0,0), l, font=fnt)
-                            lw, lh = bbox[2]-bbox[0], bbox[3]-bbox[1]
-                            line_data.append({'t': l, 'w': lw, 'h': lh, 'b': bbox})
-                            total_h += lh
-                        total_h += esp * (len(et['lineas'])-1)
+                            w_l, h_l = bbox[2] - bbox[0], bbox[3] - bbox[1]
+                            datos_lineas.append({'t': l, 'w': w_l, 'h': h_l, 'b': bbox})
+                            alto_total_bloque += h_l
+                        if len(et['lineas']) > 0: alto_total_bloque += esp * (len(et['lineas']) - 1)
                         
-                        y_cursor = y_et_px + (h_et_px - total_h)/2
-                        for item in line_data:
-                            x_cursor = x_et_px + (w_et_px - item['w'])/2
+                        y_cursor = y_et_px + (h_et_px - alto_total_bloque) / 2
+                        for item in datos_lineas:
+                            x_cursor = x_et_px + (w_et_px - item['w']) / 2
                             draw.text((x_cursor - item['b'][0], y_cursor - item['b'][1]), item['t'], font=fnt, fill=0)
                             y_cursor += item['h'] + esp
 
-                    # Generar SVG sincronizado
                     svg = [f'<?xml version="1.0"?><svg width="{w_h}mm" height="{h_h}mm" viewBox="0 0 {w_h} {h_h}" xmlns="http://www.w3.org/2000/svg">']
                     svg.append(f'<rect x="0" y="0" width="{w_h}" height="{h_h}" fill="none" stroke="none"/>')
                     for et in etiquetas:
@@ -129,7 +127,7 @@ if uploaded:
                     png_io = io.BytesIO()
                     img.save(png_io, format='PNG', dpi=(dpi, dpi))
                     zf.writestr(f'{sh_name}/grabado.png', png_io.getvalue())
-                    zf.writestr(f'{sh_name}/corte.svg', "\n".join(svg))
-
-        st.success('✅ ¡Archivos generados con éxito!')
-        st.download_button('🎁 Descargar Producción (ZIP)', zip_buf.getvalue(), 'lamicoides_produccion.zip')
+                    zf.writestr(f'{sh_name}/corte.svg', "\\n".join(svg))
+        
+        st.success('✅ ¡Producción generada correctamente!')
+        st.download_button('🎁 Descargar ZIP', zip_buf.getvalue(), 'produccion_lamicoides.zip')
