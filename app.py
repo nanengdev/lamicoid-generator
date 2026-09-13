@@ -24,9 +24,9 @@ def pts_a_px(pts): return max(1, int(round(pts * dpi / 72.0)))
 
 def cargar_fuente_escalable(size_pt):
     rutas = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        "/usr/share/fonts/truetype/freefont/FreeSans.ttf"
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
     ]
     for r in rutas:
         if os.path.exists(r):
@@ -34,17 +34,22 @@ def cargar_fuente_escalable(size_pt):
     return ImageFont.load_default()
 
 def ajustar_fuente(draw, lineas, w_px, h_px):
-    esp_mm = 1.0
-    esp_px = mm_a_px(esp_mm)
+    esp_px = mm_a_px(1.0) # Espaciado entre líneas
     for pt in range(tam_fuente_max, 5, -1):
         fnt = cargar_fuente_escalable(pt)
         max_w, total_h = 0, 0
+        metrics = []
         for l in lineas:
-            bbox = draw.textbbox((0,0), l, font=fnt)
-            max_w = max(max_w, bbox[2]-bbox[0])
-            total_h += (bbox[3]-bbox[1])
-        total_h += esp_px * (len(lineas)-1)
-        if max_w <= w_px and total_h <= h_px: 
+            bbox = draw.textbbox((0, 0), l, font=fnt)
+            w_l = bbox[2] - bbox[0]
+            h_l = bbox[3] - bbox[1]
+            max_w = max(max_w, w_l)
+            total_h += h_l
+            metrics.append((w_l, h_l))
+        
+        total_h += esp_px * (len(lineas) - 1)
+        
+        if max_w <= w_px and total_h <= h_px:
             return fnt, esp_px
     return cargar_fuente_escalable(6), esp_px
 
@@ -77,53 +82,64 @@ if uploaded:
         with zipfile.ZipFile(zip_buf, 'w') as zf:
             for sh_name in wb.sheetnames:
                 ws = wb[sh_name]
+                # Detectar columnas dinámicamente
                 header = {str(c.value).strip(): i for i, c in enumerate(ws[1], 1) if c.value}
                 if 'Texto1' not in header: continue
+                
                 etiquetas = []
                 for r in range(2, ws.max_row + 1):
                     t1 = str(ws.cell(r, header.get('Texto1')).value or '').strip()
                     t2 = str(ws.cell(r, header.get('Texto2', 99)).value or '').strip()
                     t3 = str(ws.cell(r, header.get('Texto3', 99)).value or '').strip()
                     if not t1 and not t2 and not t3: continue
-                    lineas_finales = []
-                    for t in [t1, t2, t3]:
-                        if t and t != 'None':
-                            lineas_finales.extend([l.strip() for l in t.replace('\\\\n', '\\n').split('\\n') if l.strip()])
+                    
+                    lineas = [l.strip() for l in [t1, t2, t3] if l and l != 'None']
                     ancho = float(ws.cell(r, header.get('Ancho_mm', 99)).value or 50)
                     alto = float(ws.cell(r, header.get('Alto_mm', 99)).value or 20)
                     cant = int(ws.cell(r, header.get('Cantidad', 99)).value or 1)
                     for _ in range(cant):
-                        etiquetas.append({'lineas': lineas_finales, 'ancho_mm': ancho, 'alto_mm': alto})
+                        etiquetas.append({'lineas': lineas, 'ancho_mm': ancho, 'alto_mm': alto})
+                
                 if etiquetas:
                     w_h, h_h = distribuir(etiquetas)
                     img = Image.new('L', (mm_a_px(w_h), mm_a_px(h_h)), 255)
                     draw = ImageDraw.Draw(img)
+                    
                     for et in etiquetas:
                         x_et_px, y_et_px = mm_a_px(et['x_mm']), mm_a_px(et['y_mm'])
                         w_et_px, h_et_px = mm_a_px(et['ancho_mm']), mm_a_px(et['alto_mm'])
                         m_px = mm_a_px(margen_seg)
+                        
                         fnt, esp = ajustar_fuente(draw, et['lineas'], w_et_px - 2*m_px, h_et_px - 2*m_px)
+                        
+                        # Calcular bloque para centrado vertical
                         info_lineas = []
                         alto_total = 0
                         for l in et['lineas']:
-                            bbox = draw.textbbox((0,0), l, font=fnt)
+                            bbox = draw.textbbox((0, 0), l, font=fnt)
                             wl, hl = bbox[2]-bbox[0], bbox[3]-bbox[1]
-                            info_lineas.append({'texto': l, 'w': wl, 'h': hl, 'ox': bbox[0], 'oy': bbox[1]})
+                            info_lineas.append({'t': l, 'w': wl, 'h': hl, 'ox': bbox[0], 'oy': bbox[1]})
                             alto_total += hl
-                        alto_total += esp * (len(et['lineas'])-1)
+                        alto_total += esp * (len(et['lineas']) - 1)
+                        
                         y_cursor = y_et_px + (h_et_px - alto_total) / 2
                         for item in info_lineas:
+                            # Centrado absoluto: restar el offset interno (item['ox'], item['oy'])
                             x_cursor = x_et_px + (w_et_px - item['w']) / 2
-                            draw.text((x_cursor - item['ox'], y_cursor - item['oy']), item['texto'], font=fnt, fill=0)
+                            draw.text((x_cursor - item['ox'], y_cursor - item['oy']), item['t'], font=fnt, fill=0)
                             y_cursor += item['h'] + esp
+                    
+                    # Generar SVG
                     svg = [f'<?xml version="1.0"?><svg width="{w_h}mm" height="{h_h}mm" viewBox="0 0 {w_h} {h_h}" xmlns="http://www.w3.org/2000/svg">']
                     svg.append(f'<rect x="0" y="0" width="{w_h}" height="{h_h}" fill="none" stroke="none"/>')
                     for et in etiquetas:
                         svg.append(f'<rect x="{et["x_mm"]}" y="{et["y_mm"]}" width="{et["ancho_mm"]}" height="{et["alto_mm"]}" fill="none" stroke="red" stroke-width="0.1"/>')
                     svg.append('</svg>')
+                    
                     png_io = io.BytesIO()
                     img.save(png_io, format='PNG', dpi=(dpi, dpi))
                     zf.writestr(f'{sh_name}/grabado.png', png_io.getvalue())
-                    zf.writestr(f'{sh_name}/corte.svg', "\\n".join(svg))
-        st.success('✅ Generado con fuentes escalables!')
-        st.download_button('🎁 Descargar ZIP Final', zip_buf.getvalue(), 'lamicoides_final.zip')
+                    zf.writestr(f'{sh_name}/corte.svg', "\n".join(svg))
+                    
+        st.success('✅ Proceso completado exitosamente.')
+        st.download_button('🎁 Descargar ZIP Final', zip_buf.getvalue(), 'etiquetas_lamicoides.zip')
