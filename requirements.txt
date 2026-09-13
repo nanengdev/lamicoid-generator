@@ -3,11 +3,9 @@ streamlit
 pandas
 openpyxl
 Pillow
-gspread
-google-auth
 """
 
-with open('requirements.txt', 'w') as f:
+with open('requirements.txt', 'w', encoding='utf-8') as f:
     f.write(requirements.strip())
 
-print("Archivo requirements.txt actualizado.")
+print("Archivo requirements.txt simplificado generado.")
