@@ -1,9 +1,4 @@
-# Generación del archivo requirements.txt sin código Python residual
-with open('requirements.txt', 'w', encoding='utf-8') as f:
-    f.write('streamlit\npandas\nopenpyxl\nPillow')
-
-print("¡Listo! Archivo requirements.txt creado.")
-print("Contenido actual del archivo (debe ser solo texto):")
-print("----------------------------------------------")
-!cat requirements.txt
-print("\n----------------------------------------------")
+streamlit
+pandas
+openpyxl
+Pillow
