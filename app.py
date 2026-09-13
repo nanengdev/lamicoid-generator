@@ -1,4 +1,3 @@
-streamlit_code = """
 import streamlit as st
 import pandas as pd
 import math
@@ -21,13 +20,8 @@ margen_seg = st.sidebar.slider('Margen Seguridad Texto (mm)', 0.0, 5.0, 1.5)
 def mm_a_px(mm): return int(round(mm * dpi / 25.4))
 
 def ajustar_fuente(draw, lineas, w_px, h_px):
-    # Intenta ajustar el texto al ancho disponible
     for pt in range(20, 6, -1):
-        try:
-            fnt = ImageFont.load_default() # En Streamlit Cloud usamos la default o subimos una .ttf
-        except:
-            fnt = ImageFont.load_default()
-        
+        fnt = ImageFont.load_default()
         max_w = 0
         for l in lineas:
             b = draw.textbbox((0,0), l, font=fnt)
@@ -62,7 +56,6 @@ if uploaded:
     
     if st.button('🚀 Generar Archivos para Láser'):
         ws = wb[sh_name]
-        # Detectar encabezados
         header = {str(c.value).strip(): i for i, c in enumerate(ws[1], 1) if c.value}
         
         etiquetas = []
@@ -84,43 +77,24 @@ if uploaded:
             w_h, h_h = distribuir(etiquetas)
             img = Image.new("L", (mm_a_px(w_h), mm_a_px(h_h)), 255)
             draw = ImageDraw.Draw(img)
-            
             svg = [f'<?xml version="1.0"?><svg width="{w_h}mm" height="{h_h}mm" viewBox="0 0 {w_h} {h_h}" xmlns="http://www.w3.org/2000/svg">']
-            # Rectángulo invisible para origen 0,0 en LaserGRBL
             svg.append(f'<rect x="0" y="0" width="{w_h}" height="{h_h}" fill="none" stroke="none"/>')
-            
             for et in etiquetas:
                 x_px, y_px = mm_a_px(et['x_mm']), mm_a_px(et['y_mm'])
                 w_px, h_px = mm_a_px(et['ancho_mm']), mm_a_px(et['alto_mm'])
                 m_px = mm_a_px(margen_seg)
-                
                 fnt = ajustar_fuente(draw, et['lineas'], w_px - 2*m_px, h_px - 2*m_px)
-                
-                # Dibujo simple de líneas
                 y_offset = y_px + m_px
                 for ln in et['lineas']:
                     draw.text((x_px + m_px, y_offset), ln, font=fnt, fill=0)
-                    y_offset += mm_a_px(5) 
-                
-                # SVG Rojo para corte
+                    y_offset += mm_a_px(5)
                 svg.append(f'<rect x="{et["x_mm"]}" y="{et["y_mm"]}" width="{et["ancho_mm"]}" height="{et["alto_mm"]}" fill="none" stroke="red" stroke-width="0.1"/>')
-            
             svg.append('</svg>')
-            
-            # Preparar descarga
             png_out = io.BytesIO()
             img.save(png_out, format='PNG', dpi=(dpi, dpi))
-            
             zip_buf = io.BytesIO()
             with zipfile.ZipFile(zip_buf, 'w') as zf:
                 zf.writestr('01_grabado.png', png_out.getvalue())
-                zf.writestr('02_corte.svg', "\n".join(svg))
-            
+                zf.writestr('02_corte.svg', "\\n".join(svg))
             st.success(f'¡Éxito! Generadas {len(etiquetas)} etiquetas.')
             st.download_button('🎁 Descargar ZIP para LaserGRBL', zip_buf.getvalue(), 'lamicoides_laser.zip')
-"""
-
-with open('app.py', 'w', encoding='utf-8') as f:
-    f.write(streamlit_code)
-
-print("app.py actualizado con lógica completa.")
