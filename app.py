@@ -1,30 +1,41 @@
 streamlit_code = """
 import streamlit as st
 import pandas as pd
-from pathlib import Path
 import math
-import shutil
 import zipfile
 import io
-import os
 from openpyxl import load_workbook
 from PIL import Image, ImageDraw, ImageFont
 
-st.set_page_config(page_title='Generador de Lamicoides', layout='wide')
+st.set_page_config(page_title='Generador Lamicoides', layout='wide')
 st.title('🛠️ Generador de Etiquetas Lamicoides')
 
-# --- CONFIGURACIÓN ---
+# --- CONFIGURACIÓN EN SIDEBAR ---
 st.sidebar.header('Parámetros de Diseño')
 dpi = st.sidebar.number_input('DPI (LaserGRBL)', value=600)
 sep_mm = st.sidebar.slider('Separación (mm)', 0.0, 10.0, 3.0)
 margen_hoja = st.sidebar.slider('Margen Hoja (mm)', 0.0, 20.0, 5.0)
 cols_num = st.sidebar.number_input('Columnas', min_value=1, value=3)
-margen_grabado = st.sidebar.slider('Margen Seguridad (mm)', 0.0, 5.0, 1.5)
+margen_seg = st.sidebar.slider('Margen Seguridad Texto (mm)', 0.0, 5.0, 1.5)
 
 def mm_a_px(mm): return int(round(mm * dpi / 25.4))
-def pts_a_px(pts): return max(1, int(round(pts * dpi / 72.0)))
 
-def distribuir_etiquetas(etiquetas):
+def ajustar_fuente(draw, lineas, w_px, h_px):
+    # Intenta ajustar el texto al ancho disponible
+    for pt in range(20, 6, -1):
+        try:
+            fnt = ImageFont.load_default() # En Streamlit Cloud usamos la default o subimos una .ttf
+        except:
+            fnt = ImageFont.load_default()
+        
+        max_w = 0
+        for l in lineas:
+            b = draw.textbbox((0,0), l, font=fnt)
+            max_w = max(max_w, b[2]-b[0])
+        if max_w <= w_px: return fnt
+    return ImageFont.load_default()
+
+def distribuir(etiquetas):
     cols = min(cols_num, len(etiquetas))
     filas = math.ceil(len(etiquetas) / cols)
     anchos_cols = [0.0] * cols
@@ -34,53 +45,82 @@ def distribuir_etiquetas(etiquetas):
         anchos_cols[c] = max(anchos_cols[c], et['ancho_mm'])
         altos_filas[f] = max(altos_filas[f], et['alto_mm'])
     px, py = [], []
-    cur_x, cur_y = margen_hoja, margen_hoja
-    for a in anchos_cols: px.append(cur_x); cur_x += a + sep_mm
-    for a in altos_filas: py.append(cur_y); cur_y += a + sep_mm
+    cx, cy = margen_hoja, margen_hoja
+    for a in anchos_cols: px.append(cx); cx += a + sep_mm
+    for a in altos_filas: py.append(cy); cy += a + sep_mm
     for i, et in enumerate(etiquetas):
         c, f = i % cols, i // cols
         et['x_mm'] = px[c] + (anchos_cols[c] - et['ancho_mm'])/2
         et['y_mm'] = py[f] + (altos_filas[f] - et['alto_mm'])/2
-    return cur_x - sep_mm + margen_hoja, cur_y - sep_mm + margen_hoja
+    return cx - sep_mm + margen_hoja, cy - sep_mm + margen_hoja
 
-def ajustar_fuente(draw, lineas, w_px, h_px):
-    esp = mm_a_px(1.0)
-    for pt in range(18, 5, -1):
-        fnt = ImageFont.load_default() # Simplificado para demo, usar truetype en prod
-        max_w, total_h = 0, 0
-        for l in lineas:
-            b = draw.textbbox((0,0), l, font=fnt)
-            max_w = max(max_w, b[2]-b[0])
-            total_h += (b[3]-b[1])
-        total_h += esp * (len(lineas)-1)
-        if max_w <= w_px and total_h <= h_px: return fnt, esp
-    return ImageFont.load_default(), esp
+uploaded = st.file_uploader('Carga tu archivo Excel (.xlsx)', type=['xlsx'])
 
-# --- UI ---
-uploaded_file = st.file_uploader('Carga tu Excel lamicoides.xlsx', type=['xlsx'])
-
-if uploaded_file:
-    wb = load_workbook(uploaded_file, data_only=True)
-    sheet_name = st.selectbox('Selecciona la Hoja', wb.sheetnames)
+if uploaded:
+    wb = load_workbook(uploaded, data_only=True)
+    sh_name = st.selectbox('Selecciona la Hoja', wb.sheetnames)
     
-    if st.button('🚀 Generar y Empaquetar'):
-        ws = wb[sheet_name]
-        etiquetas = []
-        # Leer datos...
-        # (Lógica de extracción de datos del Excel aquí similar al script original)
+    if st.button('🚀 Generar Archivos para Láser'):
+        ws = wb[sh_name]
+        # Detectar encabezados
+        header = {str(c.value).strip(): i for i, c in enumerate(ws[1], 1) if c.value}
         
-        # Simulación de generación para el ZIP
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, 'w') as zf:
-            # Aquí llamarías a generar_png_grabado y generar_svg_corte
-            # Y añadirías los bytes al ZIP usando zf.writestr()
-            st.info('Procesando etiquetas...')
+        etiquetas = []
+        for r in range(2, ws.max_row + 1):
+            t1 = str(ws.cell(r, header.get('Texto1', 1)).value or "").strip()
+            t2 = str(ws.cell(r, header.get('Texto2', 2)).value or "").strip()
+            t3 = str(ws.cell(r, header.get('Texto3', 3)).value or "").strip()
+            if not any([t1, t2, t3]): continue
             
-        st.success('¡Generación Exitosa!')
-        st.download_button('⬇️ Descargar ZIP', zip_buffer.getvalue(), 'etiquetas.zip', 'application/zip')
+            lineas = [l for l in [t1, t2, t3] if l]
+            ancho = float(ws.cell(r, header.get('Ancho_mm', 4)).value or 50)
+            alto = float(ws.cell(r, header.get('Alto_mm', 5)).value or 20)
+            cant = int(ws.cell(r, header.get('Cantidad', 6)).value or 1)
+            
+            for _ in range(cant):
+                etiquetas.append({'lineas': lineas, 'ancho_mm': ancho, 'alto_mm': alto})
+
+        if etiquetas:
+            w_h, h_h = distribuir(etiquetas)
+            img = Image.new("L", (mm_a_px(w_h), mm_a_px(h_h)), 255)
+            draw = ImageDraw.Draw(img)
+            
+            svg = [f'<?xml version="1.0"?><svg width="{w_h}mm" height="{h_h}mm" viewBox="0 0 {w_h} {h_h}" xmlns="http://www.w3.org/2000/svg">']
+            # Rectángulo invisible para origen 0,0 en LaserGRBL
+            svg.append(f'<rect x="0" y="0" width="{w_h}" height="{h_h}" fill="none" stroke="none"/>')
+            
+            for et in etiquetas:
+                x_px, y_px = mm_a_px(et['x_mm']), mm_a_px(et['y_mm'])
+                w_px, h_px = mm_a_px(et['ancho_mm']), mm_a_px(et['alto_mm'])
+                m_px = mm_a_px(margen_seg)
+                
+                fnt = ajustar_fuente(draw, et['lineas'], w_px - 2*m_px, h_px - 2*m_px)
+                
+                # Dibujo simple de líneas
+                y_offset = y_px + m_px
+                for ln in et['lineas']:
+                    draw.text((x_px + m_px, y_offset), ln, font=fnt, fill=0)
+                    y_offset += mm_a_px(5) 
+                
+                # SVG Rojo para corte
+                svg.append(f'<rect x="{et["x_mm"]}" y="{et["y_mm"]}" width="{et["ancho_mm"]}" height="{et["alto_mm"]}" fill="none" stroke="red" stroke-width="0.1"/>')
+            
+            svg.append('</svg>')
+            
+            # Preparar descarga
+            png_out = io.BytesIO()
+            img.save(png_out, format='PNG', dpi=(dpi, dpi))
+            
+            zip_buf = io.BytesIO()
+            with zipfile.ZipFile(zip_buf, 'w') as zf:
+                zf.writestr('01_grabado.png', png_out.getvalue())
+                zf.writestr('02_corte.svg', "\n".join(svg))
+            
+            st.success(f'¡Éxito! Generadas {len(etiquetas)} etiquetas.')
+            st.download_button('🎁 Descargar ZIP para LaserGRBL', zip_buf.getvalue(), 'lamicoides_laser.zip')
 """
 
-with open('app.py', 'w') as f:
+with open('app.py', 'w', encoding='utf-8') as f:
     f.write(streamlit_code)
 
-print("app.py actualizado con interfaz de carga y descarga.")
+print("app.py actualizado con lógica completa.")
